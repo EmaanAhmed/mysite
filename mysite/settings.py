@@ -26,7 +26,7 @@ SECRET_KEY = 'hpvo77%@xkwc6+iytb9=ve($@lpvi2c9rjk48@=-p3x-sk!^za'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ['127.0.0.1','sampledomain.com']
+ALLOWED_HOSTS = ['127.0.0.1','chattest98.herokuapp.com']
 
 
 # Application definition
