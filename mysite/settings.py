@@ -26,12 +26,13 @@ SECRET_KEY = 'hpvo77%@xkwc6+iytb9=ve($@lpvi2c9rjk48@=-p3x-sk!^za'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['192.168.1.3','192.168.1.11','192.168.137.1']
+ALLOWED_HOSTS = ['192.168.1.3','192.168.1.11','192.168.137.1','127.0.0.1']
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'rest_framework',
     'channels',
     'chat',
     'django.contrib.admin',
