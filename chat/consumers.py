@@ -1,39 +1,56 @@
 from django.contrib.auth import get_user_model
-from asgiref.sync import async_to_sync
-from channels.generic.websocket import WebsocketConsumer
+from channels.generic.websocket import  AsyncWebsocketConsumer
 import json
 from .models import Message
+from channels.db import database_sync_to_async
 from .views import get_messages_by_page, get_user_contact,get_current_chat
-
 User = get_user_model()
 
-class ChatConsumer(WebsocketConsumer):
-
-    def fetch_messages(self, data):
-        messages = get_messages_by_page(data['chatId'],data['page'])
+class ChatConsumer(AsyncWebsocketConsumer):
+    async def fetch_messages(self, data):
+        messages = await get_messages_by_page(data['chatId'],data['page'])
         content = {
             'command': 'messages',
-            'messages': self.messages_to_json(messages)
+            'messages':await self.messages_to_json(messages)
         }
-        self.send_message(content)
-        current_chat = get_current_chat(data['chatId'])
-        current_chat.messages.latest('timestamp').seen_by.add(data['user_id'])
-        current_chat.save()
+        await self.send_message(content)
+        current_chat = await get_current_chat(data['chatId'])
+        await self.addSeenbyMember(current_chat,data['user_id'])
 
-    def new_message(self, data):
-        user_contact =get_user_contact(data['from'])
-        message = Message.objects.create(
-            contact=user_contact, 
-            content=data['message'])
-        current_chat = get_current_chat(data['chatId'])
-        current_chat.messages.add(message)
-        current_chat.save()
+    @database_sync_to_async
+    def addSeenbyMember(self,current_chat,user_id):
+        current_chat.messages.latest('timestamp').seen_by.add(user_id)
+        current_chat.save()        
+
+    async def new_message(self, data):
+        user_contact = await get_user_contact(data['from'])
+        message = await self.createMessage(user_contact,data['message'])
+        current_chat = await get_current_chat(data['chatId'])
+        await self.addMessageToChat(current_chat,message)
+        print('content:')
         content = {
             'command': 'new_message',
-            'message': self.message_to_json(message)
+            'message':self.message_to_json(message)
         }
-        return self.send_chat_message(content)
+        print(content)
+        await self.send_chat_message(content)
 
+
+    @database_sync_to_async 
+    def createMessage(self,user_contact,message): 
+        msg = Message.objects.create(
+            contact=user_contact, 
+            content=message)
+        return msg
+
+    @database_sync_to_async
+    def addMessageToChat(self,current_chat,message):
+        current_chat.messages.add(message)
+        current_chat.save()        
+        
+        
+
+    @database_sync_to_async
     def messages_to_json(self, messages):
         result = []
         for message in messages:
@@ -53,29 +70,29 @@ class ChatConsumer(WebsocketConsumer):
         'new_message': new_message
     }
 
-    def connect(self):
+    async def connect(self):
         self.room_name = self.scope['url_route']['kwargs']['room_name']
         self.room_group_name = 'chat_%s' % self.room_name
-        async_to_sync(self.channel_layer.group_add)(
+        await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
         )
-        self.accept()
+        await self.accept()
 
-    def disconnect(self, close_code):
-        async_to_sync(self.channel_layer.group_discard)(
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(
             self.room_group_name,
             self.channel_name
         )
   
 
-    def receive(self, text_data):
+    async def receive(self, text_data):
         data = json.loads(text_data)
-        self.commands[data['command']](self, data)
+        await self.commands[data['command']](self, data)
         
 
-    def send_chat_message(self, message):    
-        async_to_sync(self.channel_layer.group_send)(
+    async def send_chat_message(self, message):    
+        await self.channel_layer.group_send(
             self.room_group_name,
             {
                 'type': 'chat_message',
@@ -83,51 +100,48 @@ class ChatConsumer(WebsocketConsumer):
             }
         )
 
-    def send_message(self, message):
-        self.send(text_data=json.dumps(message))
+    async def send_message(self, message):
+        await self.send(text_data=json.dumps(message))
 
-    def chat_message(self, event):
+    async def chat_message(self, event):
         message = event['message']
-        self.send(text_data=json.dumps(message))
+        await self.send(text_data=json.dumps(message))
 
 
 
-class UsersConsumer(WebsocketConsumer):
-    def connect(self):
-        print('connect')
+class UsersConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
         self.user_name = self.scope['url_route']['kwargs']['user_name']
-        print(self.user_name)
-        async_to_sync(self.channel_layer.group_add)(
+        await self.channel_layer.group_add(
             "users",
             self.channel_name
         )
-        self.update_user_status(self.user_name,True)
+        await self.update_user_status(self.user_name,True)
         status = {
             'command' : 'user_update',
             'status' : "true",
             'user_name': self.user_name
         } 
-        self.send_status(status)
-        self.accept()
+        await self.send_status(status)
+        await self.accept()
 
 
-    def disconnect(self,close_code):
+    async def disconnect(self,close_code):
         self.user_name = self.scope['url_route']['kwargs']['user_name']
-        async_to_sync(self.channel_layer.group_discard)(
+        await self.channel_layer.group_discard(
             "users",
             self.channel_name
         )
-        self.update_user_status(self.user_name,False)
+        await self.update_user_status(self.user_name,False)
         status = {
             'command' : 'user_update',
             'status' : "false",
             'user_name': self.user_name
         } 
-        self.send_status(status)
+        await self.send_status(status)
 
-    def send_status(self,status):
-        print('send_status')
-        async_to_sync(self.channel_layer.group_send)(
+    async def send_status(self,status):
+        await self.channel_layer.group_send(
             "users",
             {
                 'type': 'user_status',
@@ -135,12 +149,18 @@ class UsersConsumer(WebsocketConsumer):
             }
         ) 
 
-    def user_status(self,event):
+    async def user_status(self,event):
         status = event['status']
-        self.send(text_data=json.dumps(status))
+        await self.send(text_data=json.dumps(status))
 
-    def update_user_status(self,username,status):
-        user_contact =get_user_contact(username)
+    async def update_user_status(self,username,status):
+        user_contact = await get_user_contact(username)
+        await self.saveUserStatus(user_contact,status)
+
+    @database_sync_to_async
+    def saveUserStatus(self,user_contact,status):
         user_contact.status = status
         user_contact.save()
+
+
           
